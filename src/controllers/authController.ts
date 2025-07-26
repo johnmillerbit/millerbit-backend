@@ -38,7 +38,7 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-export const resetPassword = async (req: Request, res: Response) => {
+export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
 
   try {
@@ -47,27 +47,65 @@ export const resetPassword = async (req: Request, res: Response) => {
     const user = userResult.rows[0];
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      // Even if user not found, send a generic success message to prevent email enumeration
+      return res.status(200).json({ message: 'If an account with that email exists, a password reset link has been sent to your email address.' });
     }
 
-    // 2. Generate temporary password
-    const temporaryPassword = crypto.randomBytes(8).toString('hex');
-    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+    // 2. Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const passwordResetExpires = new Date(Date.now() + 3600000); // 1 hour from now
 
-    // 3. Update user's password in database
-    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2', [hashedPassword, user.user_id]);
+    // 3. Save token and expiry to database
+    await query(
+      'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE user_id = $3',
+      [resetToken, passwordResetExpires, user.user_id]
+    );
 
-    // 4. Send temporary password via email
-    const subject = 'Your Temporary Password for Web Access';
-    const text = `Your temporary password is: ${temporaryPassword}\n\nPlease log in with this password and change it immediately.`;
-    const html = `<p>Your temporary password is: <strong>${temporaryPassword}</strong></p><p>Please log in with this password and change it immediately.</p>`;
+    // 4. Send reset email
+    const resetURL = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
+    const subject = 'Password Reset Request';
+    const text = `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\nPlease click on the following link, or paste this into your browser to complete the process:\n\n${resetURL}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.`;
+    const html = `<p>You are receiving this because you (or someone else) have requested the reset of the password for your account.</p><p>Please click on the following link, or paste this into your browser to complete the process:</p><p><a href="${resetURL}">${resetURL}</a></p><p>If you did not request this, please ignore this email and your password will remain unchanged.</p>`;
 
     await sendEmail(user.email, subject, text, html);
 
-    res.status(200).json({ message: 'Temporary password sent to your email.' });
+    res.status(200).json({ message: 'If an account with that email exists, a password reset link has been sent to your email address.' });
 
   } catch (error: any) {
-    console.error('Password reset error:', error);
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  try {
+    // 1. Find user by token and check expiry
+    const userResult = await query(
+      'SELECT user_id FROM users WHERE password_reset_token = $1 AND password_reset_expires > NOW()',
+      [token]
+    );
+    const user = userResult.rows[0];
+
+    if (!user) {
+      return res.status(400).json({ message: 'Password reset token is invalid or has expired.' });
+    }
+
+    // 2. Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3. Update user's password and clear reset token fields
+    await query(
+      'UPDATE users SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL, updated_at = NOW() WHERE user_id = $2',
+      [hashedPassword, user.user_id]
+    );
+
+    res.status(200).json({ message: 'Password has been reset successfully.' });
+
+  } catch (error: any) {
+    console.error('Reset password error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };

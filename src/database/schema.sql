@@ -15,6 +15,8 @@ CREATE TABLE users (
     profile_picture_url VARCHAR(255),                    -- URL รูปโปรไฟล์
     role VARCHAR(50) NOT NULL DEFAULT 'team_member',     -- บทบาทของผู้ใช้: 'team_member' หรือ 'team_leader'
     status VARCHAR(50) NOT NULL DEFAULT 'active',        -- สถานะบัญชี: 'active' หรือ 'suspended'
+    password_reset_token VARCHAR(255),                   -- Token สำหรับรีเซ็ตรหัสผ่าน
+    password_reset_expires TIMESTAMP WITH TIME ZONE,     -- วันหมดอายุของ Token รีเซ็ตรหัสผ่าน
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),   -- วันที่และเวลาที่สร้างบัญชี
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()    -- วันที่และเวลาที่อัปเดตข้อมูลล่าสุด
 );

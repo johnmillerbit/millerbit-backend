@@ -204,6 +204,43 @@ export const rejectProject = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
+export const getPendingProjects = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const queryText = `
+      SELECT
+        p.project_id,
+        p.project_name,
+        p.description,
+        p.status,
+        p.created_at,
+        p.updated_at,
+        json_build_object(
+          'user_id', u.user_id,
+          'first_name', u.first_name,
+          'last_name', u.last_name,
+          'email', u.email
+        ) AS created_by,
+        COALESCE(json_agg(DISTINCT s.skill_name) FILTER (WHERE s.skill_id IS NOT NULL), '[]') AS skills,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'image'), '[]') AS images,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'video'), '[]') AS videos,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'link'), '[]') AS links
+      FROM projects p
+      JOIN users u ON p.created_by_user_id = u.user_id
+      LEFT JOIN project_skills ps ON p.project_id = ps.project_id
+      LEFT JOIN skills s ON ps.skill_id = s.skill_id
+      LEFT JOIN project_media pm ON p.project_id = pm.project_id
+      WHERE p.status = 'pending'
+      GROUP BY p.project_id, u.user_id
+      ORDER BY p.created_at DESC
+    `;
+    const projectsResult = await query(queryText);
+    res.status(200).json(projectsResult.rows);
+  } catch (error: any) {
+    console.error('Error fetching pending projects:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 // Multer configuration for project media uploads
 const projectMediaStorage = multer.diskStorage({
   destination: (req, file, cb) => {
