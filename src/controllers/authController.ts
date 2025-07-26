@@ -27,7 +27,7 @@ export const login = async (req: Request, res: Response) => {
     const token = jwt.sign(
       { userId: user.user_id, email: user.email, role: user.role },
       process.env.JWT_SECRET as string,
-      { expiresIn: '1h' }
+      { expiresIn: '7d' }
     );
 
     res.status(200).json({ message: 'Login successful', token });
@@ -58,7 +58,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2', [hashedPassword, user.user_id]);
 
     // 4. Send temporary password via email
-    const subject = 'Your Temporary Password for Project Access';
+    const subject = 'Your Temporary Password for Web Access';
     const text = `Your temporary password is: ${temporaryPassword}\n\nPlease log in with this password and change it immediately.`;
     const html = `<p>Your temporary password is: <strong>${temporaryPassword}</strong></p><p>Please log in with this password and change it immediately.</p>`;
 
