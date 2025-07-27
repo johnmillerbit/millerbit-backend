@@ -50,6 +50,7 @@ CREATE TABLE projects (
     project_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- รหัสโปรเจกต์
     project_name VARCHAR(255) NOT NULL,                   -- ชื่อโปรเจกต์
     description TEXT,                                     -- คำอธิบายโปรเจกต์
+    project_picture_url VARCHAR(255),                     -- URL รูปภาพโปรเจกต์
     status VARCHAR(50) NOT NULL DEFAULT 'pending',        -- สถานะโปรเจกต์: 'pending', 'approved', 'rejected'
     created_by_user_id UUID NOT NULL,                     -- รหัสผู้ใช้ที่สร้างโปรเจกต์ (Foreign Key)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),    -- วันที่และเวลาที่สร้างโปรเจกต์

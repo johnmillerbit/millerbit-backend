@@ -32,7 +32,7 @@ router.post('/create', authorizeRoles(['team_leader', 'admin']), createMember); 
 router.delete('/:id', authorizeRoles(['team_leader', 'admin']), deleteUser); // Only Team Leaders and Admins can delete users
 
 // User-specific actions (can be done by self, team_leader, or admin)
-router.put('/:id', updateUserProfile); // User can update their own profile (or TL/Admin can)
+router.put('/:id', authorizeRoles(['team_member', 'team_leader', 'admin']), updateUserProfile); // User can update their own profile (or TL/Admin can)
 router.post('/:id/skills', addSkillToUser); // User can add skills to their profile (or TL/Admin can)
 router.delete('/:id/skills/:skillId', removeSkillFromUser); // User can remove skills from their profile (or TL/Admin can)
 router.post('/:id/profile-picture', upload.single('profile_picture'), uploadProfilePicture); // User can upload their profile picture (or TL/Admin can)

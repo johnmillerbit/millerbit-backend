@@ -8,21 +8,80 @@ import path from 'path';
 interface AuthenticatedRequest extends Request {
   userId?: string;
   userRole?: string;
+  file?: Express.Multer.File; // Add file property for single file uploads
 }
 
+// Multer configuration for project picture uploads (main picture)
+const projectPictureStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/project_media/'); // Store project pictures in the same media folder
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = uuidv4();
+    const fileExtension = path.extname(file.originalname);
+    cb(null, 'project_picture-' + uniqueSuffix + fileExtension);
+  },
+});
+
+const projectPictureFileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  // Accept only image files for the main project picture
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed for the project picture!'));
+  }
+};
+
+export const uploadProjectPictureMiddleware = multer({ storage: projectPictureStorage, fileFilter: projectPictureFileFilter }).single('project_picture');
+
 export const createProject = async (req: AuthenticatedRequest, res: Response) => {
-  const { project_name, description, participants, skills, media } = req.body;
+  const { project_name, description } = req.body;
   const created_by_user_id = req.userId; // Get user ID from authenticated request
 
   if (!project_name || !created_by_user_id) {
     return res.status(400).json({ message: 'Project name and creator ID are required' });
   }
 
+  let project_picture_url: string | null = null;
+  if (req.file) {
+    project_picture_url = `/uploads/project_media/${req.file.filename}`;
+  }
+
+  let participants: string[] = [];
+  if (req.body.participants && typeof req.body.participants === 'string') {
+    try {
+      participants = JSON.parse(req.body.participants);
+    } catch (e) {
+      console.error('Error parsing participants:', e);
+      return res.status(400).json({ message: 'Invalid participants data' });
+    }
+  }
+
+  let skills: string[] = [];
+  if (req.body.skills && typeof req.body.skills === 'string') {
+    try {
+      skills = JSON.parse(req.body.skills);
+    } catch (e) {
+      console.error('Error parsing skills:', e);
+      return res.status(400).json({ message: 'Invalid skills data' });
+    }
+  }
+
+  let media: any[] = [];
+  if (req.body.media && typeof req.body.media === 'string') {
+    try {
+      media = JSON.parse(req.body.media);
+    } catch (e) {
+      console.error('Error parsing media:', e);
+      return res.status(400).json({ message: 'Invalid media data' });
+    }
+  }
+
   try {
     // 1. Insert into projects table
     const projectResult = await query(
-      'INSERT INTO projects (project_name, description, created_by_user_id) VALUES ($1, $2, $3) RETURNING project_id',
-      [project_name, description, created_by_user_id]
+      'INSERT INTO projects (project_name, description, project_picture_url, created_by_user_id) VALUES ($1, $2, $3, $4) RETURNING project_id',
+      [project_name, description, project_picture_url, created_by_user_id]
     );
     const projectId = projectResult.rows[0].project_id;
 
@@ -50,7 +109,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       }
     }
 
-    // 4. Add media (if any)
+    // 4. Add media (if any) - This is for additional media, not the main project picture
     if (media && Array.isArray(media)) {
       for (const mediaItem of media) {
         const { media_type, url, description } = mediaItem;
@@ -63,7 +122,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       }
     }
 
-    res.status(201).json({ message: 'Project created successfully', projectId });
+    res.status(201).json({ message: 'Project created successfully', projectId, project_picture_url });
 
   } catch (error: any) {
     console.error('Error creating project:', error);
@@ -80,6 +139,7 @@ export const getPortfolioProjects = async (req: AuthenticatedRequest, res: Respo
         p.project_id,
         p.project_name,
         p.description,
+        p.project_picture_url,
         p.status,
         p.created_at,
         p.updated_at,
@@ -204,6 +264,43 @@ export const rejectProject = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
+export const getAllProjects = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const queryText = `
+      SELECT
+        p.project_id,
+        p.project_name,
+        p.description,
+        p.project_picture_url,
+        p.status,
+        p.created_at,
+        p.updated_at,
+        json_build_object(
+          'user_id', u.user_id,
+          'first_name', u.first_name,
+          'last_name', u.last_name,
+          'email', u.email
+        ) AS created_by,
+        COALESCE(json_agg(DISTINCT s.skill_name) FILTER (WHERE s.skill_id IS NOT NULL), '[]') AS skills,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'image'), '[]') AS images,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'video'), '[]') AS videos,
+        COALESCE(json_agg(DISTINCT pm.url) FILTER (WHERE pm.media_id IS NOT NULL AND pm.media_type = 'link'), '[]') AS links
+      FROM projects p
+      JOIN users u ON p.created_by_user_id = u.user_id
+      LEFT JOIN project_skills ps ON p.project_id = ps.project_id
+      LEFT JOIN skills s ON ps.skill_id = s.skill_id
+      LEFT JOIN project_media pm ON p.project_id = pm.project_id
+      GROUP BY p.project_id, u.user_id
+      ORDER BY p.created_at DESC
+    `;
+    const projectsResult = await query(queryText);
+    res.status(200).json(projectsResult.rows);
+  } catch (error: any) {
+    console.error('Error fetching all projects:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 export const getPendingProjects = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const queryText = `
@@ -211,6 +308,7 @@ export const getPendingProjects = async (req: AuthenticatedRequest, res: Respons
         p.project_id,
         p.project_name,
         p.description,
+        p.project_picture_url,
         p.status,
         p.created_at,
         p.updated_at,
@@ -237,6 +335,60 @@ export const getPendingProjects = async (req: AuthenticatedRequest, res: Respons
     res.status(200).json(projectsResult.rows);
   } catch (error: any) {
     console.error('Error fetching pending projects:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const getPublicProjectDetails = async (req: Request, res: Response) => {
+  const { id } = req.params; // project_id
+
+  try {
+    const queryText = `
+      SELECT
+        p.project_id,
+        p.project_name,
+        p.description,
+        p.project_picture_url,
+        p.status,
+        p.created_at,
+        p.updated_at,
+        json_build_object(
+          'user_id', u.user_id,
+          'first_name', u.first_name,
+          'last_name', u.last_name,
+          'email', u.email
+        ) AS created_by,
+        COALESCE(
+          (SELECT json_agg(json_build_object('user_id', pp_u.user_id, 'first_name', pp_u.first_name, 'last_name', pp_u.last_name))
+           FROM project_participants pp
+           JOIN users pp_u ON pp.user_id = pp_u.user_id
+           WHERE pp.project_id = p.project_id
+          ), '[]'
+        ) AS participants,
+        COALESCE(json_agg(DISTINCT s.skill_name) FILTER (WHERE s.skill_id IS NOT NULL), '[]') AS skills,
+        COALESCE(
+          (SELECT json_agg(json_build_object('media_type', pm.media_type, 'url', pm.url, 'description', pm.description))
+           FROM project_media pm
+           WHERE pm.project_id = p.project_id
+          ), '[]'
+        ) AS media
+      FROM projects p
+      JOIN users u ON p.created_by_user_id = u.user_id
+      LEFT JOIN project_skills ps ON p.project_id = ps.project_id
+      LEFT JOIN skills s ON ps.skill_id = s.skill_id
+      WHERE p.project_id = $1 AND p.status = 'approved'
+      GROUP BY p.project_id, u.user_id
+    `;
+    const projectResult = await query(queryText, [id]);
+
+    if (projectResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Project not found or not approved' });
+    }
+
+    res.status(200).json(projectResult.rows[0]);
+
+  } catch (error: any) {
+    console.error('Error fetching public project details:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -284,6 +436,42 @@ export const uploadProjectMedia = async (req: AuthenticatedRequest, res: Respons
 
   } catch (error: any) {
     console.error('Error uploading project media:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const deleteProject = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params; // project_id
+
+  try {
+    // Start a transaction
+    await query('BEGIN');
+
+    // 1. Delete related records from project_media
+    await query('DELETE FROM project_media WHERE project_id = $1', [id]);
+
+    // 2. Delete related records from project_skills
+    await query('DELETE FROM project_skills WHERE project_id = $1', [id]);
+
+    // 3. Delete related records from project_participants
+    await query('DELETE FROM project_participants WHERE project_id = $1', [id]);
+
+    // 4. Finally, delete the project itself
+    const result = await query('DELETE FROM projects WHERE project_id = $1', [id]);
+
+    if (result.rowCount === 0) {
+      await query('ROLLBACK');
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Commit the transaction
+    await query('COMMIT');
+
+    res.status(200).json({ message: `Project ${id} and its related data deleted successfully.` });
+
+  } catch (error: any) {
+    await query('ROLLBACK'); // Rollback on error
+    console.error('Error deleting project:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
