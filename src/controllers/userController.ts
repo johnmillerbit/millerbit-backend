@@ -1,20 +1,23 @@
-// my-backend-api/src/controllers/userController.ts
 import { Request, Response } from 'express';
 import { query } from '../database';
 import multer from 'multer';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
-import fs from 'fs'; // Import fs for directory creation
+import fs from 'fs';
+import { handleControllerError, handleAuthError } from '../utils/errorHandler';
 
 interface AuthenticatedRequest extends Request {
   userId?: string;
   userRole?: string;
+  file?: Express.Multer.File;
 }
 
-// --- New/Modified Controller Functions ---
-
-// GET /api/users/:id - Get basic user profile details
+/**
+ * @route GET /api/users/:id
+ * @desc Get basic user profile details
+ * @access Public
+ */
 export const getUserProfile = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
@@ -46,12 +49,15 @@ export const getUserProfile = async (req: AuthenticatedRequest, res: Response) =
     res.status(200).json(user);
 
   } catch (error: any) {
-    console.error('Error fetching user profile:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching user profile');
   }
 };
 
-// GET /api/users/:id/skills - Get skills associated with a user
+/**
+ * @route GET /api/users/:id/skills
+ * @desc Get skills associated with a user
+ * @access Public
+ */
 export const getUserSkills = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
@@ -67,12 +73,15 @@ export const getUserSkills = async (req: AuthenticatedRequest, res: Response) =>
     res.status(200).json(skillsResult.rows);
 
   } catch (error: any) {
-    console.error('Error fetching user skills:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching user skills');
   }
 };
 
-// GET /api/users/:id/projects - Get projects associated with a user
+/**
+ * @route GET /api/users/:id/projects
+ * @desc Get projects associated with a user
+ * @access Public
+ */
 export const getUserProjects = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
@@ -97,13 +106,15 @@ export const getUserProjects = async (req: AuthenticatedRequest, res: Response) 
     res.status(200).json(projectsResult.rows);
 
   } catch (error: any) {
-    console.error('Error fetching user projects:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching user projects');
   }
 };
 
-// --- Existing Controller Functions (included for completeness, no changes here unless specified) ---
-
+/**
+ * @route POST /api/users
+ * @desc Create a new member (user)
+ * @access Private (Admin)
+ */
 export const createMember = async (req: Request, res: Response) => {
   const { email, password, first_name, last_name, position, bio, profile_picture_url, role } = req.body;
 
@@ -128,16 +139,20 @@ export const createMember = async (req: Request, res: Response) => {
     res.status(201).json(newUserResult.rows[0]);
 
   } catch (error: any) {
-    console.error('Error creating member:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error creating member');
   }
 };
 
+/**
+ * @route DELETE /api/users/:id
+ * @desc Delete a user
+ * @access Private (Admin, Team Leader - with restrictions)
+ */
 export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   if (req.userId === id) {
-    return res.status(403).json({ message: 'Forbidden: You cannot delete your own account.' });
+    return handleAuthError(res, 'Forbidden: You cannot delete your own account.', 403);
   }
 
   try {
@@ -146,7 +161,7 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(404).json({ message: 'User not found.' });
     }
     if (targetUserResult.rows[0].role === 'team_leader' && req.userRole !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only an admin can delete another Team Leader.' });
+      return handleAuthError(res, 'Forbidden: Only an admin can delete another Team Leader.', 403);
     }
 
     const deleteResult = await query('DELETE FROM users WHERE user_id = $1 RETURNING user_id', [id]);
@@ -158,27 +173,35 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
     res.status(200).json({ message: `User ${id} deleted successfully.` });
 
   } catch (error: any) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error deleting user');
   }
 };
 
+/**
+ * @route GET /api/users
+ * @desc Get all users
+ * @access Private (Team Leader, Admin)
+ */
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
     const usersResult = await query('SELECT user_id, first_name, last_name, email, role, position, status, profile_picture_url FROM users');
     res.status(200).json(usersResult.rows);
   } catch (error: any) {
-    console.error('Error fetching all users:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching all users');
   }
 };
 
+/**
+ * @route PUT /api/users/:id/profile
+ * @desc Update user profile details
+ * @access Private (Authenticated User, Team Leader, Admin)
+ */
 export const updateUserProfile = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { first_name, last_name, position, bio, profile_picture_url, skills, email } = req.body;
 
   if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return res.status(403).json({ message: 'Forbidden: You can only update your own profile unless you are a Team Leader or Admin.' });
+    return handleAuthError(res, 'Forbidden: You can only update your own profile unless you are a Team Leader or Admin.', 403);
   }
 
   try {
@@ -235,11 +258,15 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
     res.status(200).json(updatedUser.rows[0]);
 
   } catch (error: any) {
-    console.error('Error updating user profile:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error updating user profile');
   }
 };
 
+/**
+ * @route POST /api/users/:id/skills
+ * @desc Add a skill to a user's profile
+ * @access Private (Authenticated User, Team Leader, Admin)
+ */
 export const addSkillToUser = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { skill_name } = req.body;
@@ -249,7 +276,7 @@ export const addSkillToUser = async (req: AuthenticatedRequest, res: Response) =
   }
 
   if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return res.status(403).json({ message: 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.' });
+    return handleAuthError(res, 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.', 403);
   }
 
   try {
@@ -263,20 +290,23 @@ export const addSkillToUser = async (req: AuthenticatedRequest, res: Response) =
 
     await query('INSERT INTO user_skills (user_id, skill_id) VALUES ($1, $2) ON CONFLICT (user_id, skill_id) DO NOTHING', [id, skillId]);
 
-    // Return the specific skill just added/confirmed
     res.status(200).json({ message: `Skill '${skill_name}' added successfully to user ${id}`, skill: { skill_id: skillId, skill_name: skill_name } });
 
   } catch (error: any) {
-    console.error('Error adding skill to user:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error adding skill to user');
   }
 };
 
+/**
+ * @route DELETE /api/users/:id/skills/:skillId
+ * @desc Remove a skill from a user's profile
+ * @access Private (Authenticated User, Team Leader, Admin)
+ */
 export const removeSkillFromUser = async (req: AuthenticatedRequest, res: Response) => {
   const { id, skillId } = req.params;
 
   if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return res.status(403).json({ message: 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.' });
+    return handleAuthError(res, 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.', 403);
   }
 
   try {
@@ -289,16 +319,13 @@ export const removeSkillFromUser = async (req: AuthenticatedRequest, res: Respon
     res.status(200).json({ message: `Skill ${skillId} removed successfully from user ${id}` });
 
   } catch (error: any) {
-    console.error('Error removing skill from user:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error removing skill from user');
   }
 };
 
-// Multer configuration for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '..', '..', 'uploads', 'profile_pictures'); // Adjusted path for Multer
-    // Ensure the directory exists
+    const uploadPath = path.join(__dirname, '..', '..', 'uploads', 'profile_pictures');
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -321,11 +348,16 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 
 export const upload = multer({ storage: storage, fileFilter: fileFilter });
 
+/**
+ * @route POST /api/users/:id/profile-picture
+ * @desc Upload a profile picture for a user
+ * @access Private (Authenticated User, Team Leader, Admin)
+ */
 export const uploadProfilePicture = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return res.status(403).json({ message: 'Forbidden: You can only upload your own profile picture unless you are a Team Leader or Admin.' });
+    return handleAuthError(res, 'Forbidden: You can only upload your own profile picture unless you are a Team Leader or Admin.', 403);
   }
 
   try {
@@ -333,8 +365,6 @@ export const uploadProfilePicture = async (req: AuthenticatedRequest, res: Respo
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // This URL needs to be accessible from the frontend.
-    // Ensure your Express server is serving static files from the 'uploads' directory.
     const profilePictureUrl = `/uploads/profile_pictures/${req.file.filename}`;
 
     await query('UPDATE users SET profile_picture_url = $1, updated_at = NOW() WHERE user_id = $2', [profilePictureUrl, id]);
@@ -342,7 +372,6 @@ export const uploadProfilePicture = async (req: AuthenticatedRequest, res: Respo
     res.status(200).json({ message: 'Profile picture uploaded successfully', profile_picture_url: profilePictureUrl });
 
   } catch (error: any) {
-    console.error('Error uploading profile picture:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error uploading profile picture');
   }
 };

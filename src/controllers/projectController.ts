@@ -4,17 +4,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { sendEmail } from '../utils/email';
 import multer from 'multer';
 import path from 'path';
+import { handleControllerError } from '../utils/errorHandler';
 
 interface AuthenticatedRequest extends Request {
   userId?: string;
   userRole?: string;
-  file?: Express.Multer.File; // Add file property for single file uploads
+  file?: Express.Multer.File;
 }
 
-// Multer configuration for project picture uploads (main picture)
 const projectPictureStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/project_media/'); // Store project pictures in the same media folder
+    cb(null, 'uploads/project_media/');
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = uuidv4();
@@ -24,7 +24,6 @@ const projectPictureStorage = multer.diskStorage({
 });
 
 const projectPictureFileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  // Accept only image files for the main project picture
   if (file.mimetype.startsWith('image/')) {
     cb(null, true);
   } else {
@@ -34,9 +33,14 @@ const projectPictureFileFilter = (req: Request, file: Express.Multer.File, cb: m
 
 export const uploadProjectPictureMiddleware = multer({ storage: projectPictureStorage, fileFilter: projectPictureFileFilter }).single('project_picture');
 
+/**
+ * @route POST /api/projects
+ * @desc Create a new project
+ * @access Private (Authenticated User)
+ */
 export const createProject = async (req: AuthenticatedRequest, res: Response) => {
   const { project_name, description } = req.body;
-  const created_by_user_id = req.userId; // Get user ID from authenticated request
+  const created_by_user_id = req.userId;
 
   if (!project_name || !created_by_user_id) {
     return res.status(400).json({ message: 'Project name and creator ID are required' });
@@ -52,7 +56,6 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     try {
       participants = JSON.parse(req.body.participants);
     } catch (e) {
-      console.error('Error parsing participants:', e);
       return res.status(400).json({ message: 'Invalid participants data' });
     }
   }
@@ -62,7 +65,6 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     try {
       skills = JSON.parse(req.body.skills);
     } catch (e) {
-      console.error('Error parsing skills:', e);
       return res.status(400).json({ message: 'Invalid skills data' });
     }
   }
@@ -72,20 +74,19 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     try {
       media = JSON.parse(req.body.media);
     } catch (e) {
-      console.error('Error parsing media:', e);
       return res.status(400).json({ message: 'Invalid media data' });
     }
   }
 
   try {
-    // 1. Insert into projects table
+    // Insert into projects table
     const projectResult = await query(
       'INSERT INTO projects (project_name, description, project_picture_url, created_by_user_id) VALUES ($1, $2, $3, $4) RETURNING project_id',
       [project_name, description, project_picture_url, created_by_user_id]
     );
     const projectId = projectResult.rows[0].project_id;
 
-    // 2. Add participants (if any)
+    // Add participants (if any)
     if (participants && Array.isArray(participants)) {
       for (const participantId of participants) {
         await query('INSERT INTO project_participants (project_id, user_id) VALUES ($1, $2) ON CONFLICT (project_id, user_id) DO NOTHING', [projectId, participantId]);
@@ -94,8 +95,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     // Add the creator as a participant by default
     await query('INSERT INTO project_participants (project_id, user_id) VALUES ($1, $2) ON CONFLICT (project_id, user_id) DO NOTHING', [projectId, created_by_user_id]);
 
-
-    // 3. Add skills (if any)
+    // Add skills (if any)
     if (skills && Array.isArray(skills)) {
       for (const skillName of skills) {
         let skillResult = await query('SELECT skill_id FROM skills WHERE skill_name = $1', [skillName]);
@@ -109,7 +109,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       }
     }
 
-    // 4. Add media (if any) - This is for additional media, not the main project picture
+    // Add media (if any) - This is for additional media, not the main project picture
     if (media && Array.isArray(media)) {
       for (const mediaItem of media) {
         const { media_type, url, description } = mediaItem;
@@ -125,11 +125,15 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     res.status(201).json({ message: 'Project created successfully', projectId, project_picture_url });
 
   } catch (error: any) {
-    console.error('Error creating project:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error creating project');
   }
 };
 
+/**
+ * @route GET /api/portfolio/projects
+ * @desc Get projects for portfolio (can filter by memberId and skillName)
+ * @access Public
+ */
 export const getPortfolioProjects = async (req: AuthenticatedRequest, res: Response) => {
   const { memberId, skillName } = req.query;
 
@@ -183,11 +187,15 @@ export const getPortfolioProjects = async (req: AuthenticatedRequest, res: Respo
     res.status(200).json(projectsResult.rows);
 
   } catch (error: any) {
-    console.error('Error fetching portfolio projects:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching portfolio projects');
   }
 };
 
+/**
+ * @route PUT /api/projects/:id/approve
+ * @desc Approve a pending project
+ * @access Private (Team Leader, Admin)
+ */
 export const approveProject = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params; // project_id
 
@@ -218,11 +226,15 @@ export const approveProject = async (req: AuthenticatedRequest, res: Response) =
     res.status(200).json({ message: `Project ${id} approved successfully.` });
 
   } catch (error: any) {
-    console.error('Error approving project:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error approving project');
   }
 };
 
+/**
+ * @route PUT /api/projects/:id/reject
+ * @desc Reject a pending project
+ * @access Private (Team Leader, Admin)
+ */
 export const rejectProject = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params; // project_id
   const { reason } = req.body; // Optional reason for rejection
@@ -259,11 +271,15 @@ export const rejectProject = async (req: AuthenticatedRequest, res: Response) =>
     res.status(200).json({ message: `Project ${id} rejected successfully.` });
 
   } catch (error: any) {
-    console.error('Error rejecting project:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error rejecting project');
   }
 };
 
+/**
+ * @route GET /api/projects
+ * @desc Get all projects
+ * @access Private (Team Leader, Admin)
+ */
 export const getAllProjects = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const queryText = `
@@ -296,11 +312,15 @@ export const getAllProjects = async (req: AuthenticatedRequest, res: Response) =
     const projectsResult = await query(queryText);
     res.status(200).json(projectsResult.rows);
   } catch (error: any) {
-    console.error('Error fetching all projects:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching all projects');
   }
 };
 
+/**
+ * @route GET /api/projects/pending
+ * @desc Get all pending projects
+ * @access Private (Team Leader, Admin)
+ */
 export const getPendingProjects = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const queryText = `
@@ -334,11 +354,15 @@ export const getPendingProjects = async (req: AuthenticatedRequest, res: Respons
     const projectsResult = await query(queryText);
     res.status(200).json(projectsResult.rows);
   } catch (error: any) {
-    console.error('Error fetching pending projects:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching pending projects');
   }
 };
 
+/**
+ * @route GET /api/projects/:id
+ * @desc Get public details of a single project
+ * @access Public
+ */
 export const getPublicProjectDetails = async (req: Request, res: Response) => {
   const { id } = req.params; // project_id
 
@@ -388,36 +412,17 @@ export const getPublicProjectDetails = async (req: Request, res: Response) => {
     res.status(200).json(projectResult.rows[0]);
 
   } catch (error: any) {
-    console.error('Error fetching public project details:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching public project details');
   }
 };
 
-// Multer configuration for project media uploads
-const projectMediaStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/project_media/'); // Directory to store uploaded files
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = uuidv4();
-    const fileExtension = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + fileExtension);
-  },
-});
-
-const projectMediaFileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  // Accept only image and video files
-  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only image and video files are allowed!'));
-  }
-};
-
-export const uploadProjectMediaMiddleware = multer({ storage: projectMediaStorage, fileFilter: projectMediaFileFilter });
-
+/**
+ * @route POST /api/projects/:id/media
+ * @desc Upload additional media for a project
+ * @access Private (Authenticated User, Team Leader, Admin - only for own projects or if authorized)
+ */
 export const uploadProjectMedia = async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params; // project_id
+  const { id } = req.params;
 
   try {
     if (!req.file) {
@@ -435,11 +440,15 @@ export const uploadProjectMedia = async (req: AuthenticatedRequest, res: Respons
     res.status(200).json({ message: 'Project media uploaded successfully', media_url: mediaUrl, media_type: mediaType });
 
   } catch (error: any) {
-    console.error('Error uploading project media:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error uploading project media');
   }
 };
 
+/**
+ * @route DELETE /api/projects/:id
+ * @desc Delete a project and all its associated data
+ * @access Private (Team Leader, Admin, or Project Creator)
+ */
 export const deleteProject = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params; // project_id
 
@@ -471,7 +480,6 @@ export const deleteProject = async (req: AuthenticatedRequest, res: Response) =>
 
   } catch (error: any) {
     await query('ROLLBACK'); // Rollback on error
-    console.error('Error deleting project:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error deleting project');
   }
 };

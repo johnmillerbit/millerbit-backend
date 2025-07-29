@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { query } from '../database';
 import { sendEmail } from '../utils/email';
-import crypto from 'crypto';
+import { handleControllerError, handleAuthError } from '../utils/errorHandler';
 
+/**
+ * @route POST /api/auth/login
+ * @desc Authenticate user and return JWT token
+ * @access Public
+ */
 export const login = async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
@@ -14,13 +20,13 @@ export const login = async (req: Request, res: Response) => {
     const user = userResult.rows[0];
 
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return handleAuthError(res, 'Invalid credentials');
     }
 
     // 2. Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return handleAuthError(res, 'Invalid credentials');
     }
 
     // 3. Generate JWT
@@ -33,11 +39,15 @@ export const login = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'Login successful', token });
 
   } catch (error: any) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Login error');
   }
 };
 
+/**
+ * @route POST /api/auth/forgot-password
+ * @desc Request password reset link
+ * @access Public
+ */
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
 
@@ -72,11 +82,15 @@ export const forgotPassword = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'If an account with that email exists, a password reset link has been sent to your email address.' });
 
   } catch (error: any) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Forgot password error');
   }
 };
 
+/**
+ * @route POST /api/auth/reset-password/:token
+ * @desc Reset user password using token
+ * @access Public
+ */
 export const resetPassword = async (req: Request, res: Response) => {
   const { token } = req.params;
   const { password } = req.body;
@@ -90,7 +104,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     const user = userResult.rows[0];
 
     if (!user) {
-      return res.status(400).json({ message: 'Password reset token is invalid or has expired.' });
+      return handleAuthError(res, 'Password reset token is invalid or has expired.', 400);
     }
 
     // 2. Hash new password
@@ -105,7 +119,6 @@ export const resetPassword = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'Password has been reset successfully.' });
 
   } catch (error: any) {
-    console.error('Reset password error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Reset password error');
   }
 };

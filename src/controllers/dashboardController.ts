@@ -1,6 +1,12 @@
 import { Request, Response } from 'express';
 import { query } from '../database';
+import { handleControllerError } from '../utils/errorHandler';
 
+/**
+ * @route GET /api/dashboard/data
+ * @desc Get dashboard data (member count, total projects, pending projects)
+ * @access Private (Team Leader, Admin)
+ */
 export const getDashboardData = async (req: Request, res: Response) => {
   try {
     // Fetch member count
@@ -22,11 +28,15 @@ export const getDashboardData = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('Error fetching dashboard data:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching dashboard data');
   }
 };
 
+/**
+ * @route GET /api/dashboard/public-overview
+ * @desc Get public overview data (member count, total projects)
+ * @access Public
+ */
 export const getPublicOverviewData = async (req: Request, res: Response) => {
   try {
     // Fetch member count
@@ -43,7 +53,6 @@ export const getPublicOverviewData = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('Error fetching public overview data:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    handleControllerError(res, error, 'Error fetching public overview data');
   }
 };
