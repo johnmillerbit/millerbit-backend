@@ -13,13 +13,13 @@ const router = Router();
 router.post('/', authenticateToken, authorizeRoles(['team_member', 'team_leader', 'admin']), uploadProjectPictureMiddleware, createProject);
 
 // Approve a pending project. Only team leaders can perform this action.
-router.post('/:id/approve', authenticateToken, authorizeRoles(['team_leader']), approveProject);
+router.put('/:id/approve', authenticateToken, authorizeRoles(['team_leader']), approveProject);
 
 // Reject a pending project. Only team leaders can perform this action.
-router.post('/:id/reject', authenticateToken, authorizeRoles(['team_leader']), rejectProject);
+router.put('/:id/reject', authenticateToken, authorizeRoles(['team_leader']), rejectProject);
 
 // Upload media (images, videos) for a specific project.
-router.post('/:id/media', authenticateToken, uploadProjectMediaMiddleware.single('project_media'), uploadProjectMedia);
+router.post('/:id/media', authenticateToken, uploadProjectMediaMiddleware, uploadProjectMedia);
 
 // Protected route to get all pending projects for review.
 router.get('/pending', authenticateToken, authorizeRoles(['team_leader']), getPendingProjects);

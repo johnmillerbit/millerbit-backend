@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { query } from '../database';
 import { sendEmail } from '../utils/email';
 import { handleControllerError, handleAuthError } from '../utils/errorHandler';
+import { env } from '../config/env';
 
 /**
  * @route POST /api/auth/login
@@ -32,7 +33,7 @@ export const login = async (req: Request, res: Response) => {
     // 3. Generate JWT
     const token = jwt.sign(
       { userId: user.user_id, email: user.email, role: user.role },
-      process.env.JWT_SECRET as string,
+      env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -72,7 +73,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     );
 
     // 4. Send reset email
-    const resetURL = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
+    const resetURL = `${env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
     const subject = 'Password Reset Request';
     const text = `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\nPlease click on the following link, or paste this into your browser to complete the process:\n\n${resetURL}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.`;
     const html = `<p>You are receiving this because you (or someone else) have requested the reset of the password for your account.</p><p>Please click on the following link, or paste this into your browser to complete the process:</p><p><a href="${resetURL}">${resetURL}</a></p><p>If you did not request this, please ignore this email and your password will remain unchanged.</p>`;

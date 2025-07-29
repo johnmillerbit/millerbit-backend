@@ -5,6 +5,7 @@ import { sendEmail } from '../utils/email';
 import multer from 'multer';
 import path from 'path';
 import { handleControllerError } from '../utils/errorHandler';
+import { parseJsonField } from '../utils/parseJsonField';
 
 interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -33,6 +34,27 @@ const projectPictureFileFilter = (req: Request, file: Express.Multer.File, cb: m
 
 export const uploadProjectPictureMiddleware = multer({ storage: projectPictureStorage, fileFilter: projectPictureFileFilter }).single('project_picture');
 
+const projectMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/project_media/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = uuidv4();
+    const fileExtension = path.extname(file.originalname);
+    cb(null, 'project_media-' + uniqueSuffix + fileExtension);
+  },
+});
+
+const projectMediaFileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image and video files are allowed for project media!'));
+  }
+};
+
+export const uploadProjectMediaMiddleware = multer({ storage: projectMediaStorage, fileFilter: projectMediaFileFilter }).single('project_media');
+
 /**
  * @route POST /api/projects
  * @desc Create a new project
@@ -51,32 +73,14 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     project_picture_url = `/uploads/project_media/${req.file.filename}`;
   }
 
-  let participants: string[] = [];
-  if (req.body.participants && typeof req.body.participants === 'string') {
-    try {
-      participants = JSON.parse(req.body.participants);
-    } catch (e) {
-      return res.status(400).json({ message: 'Invalid participants data' });
-    }
-  }
+  const participants = parseJsonField<string[]>(res, req.body.participants, 'participants', []);
+  if (participants === null) return;
 
-  let skills: string[] = [];
-  if (req.body.skills && typeof req.body.skills === 'string') {
-    try {
-      skills = JSON.parse(req.body.skills);
-    } catch (e) {
-      return res.status(400).json({ message: 'Invalid skills data' });
-    }
-  }
+  const skills = parseJsonField<string[]>(res, req.body.skills, 'skills', []);
+  if (skills === null) return;
 
-  let media: any[] = [];
-  if (req.body.media && typeof req.body.media === 'string') {
-    try {
-      media = JSON.parse(req.body.media);
-    } catch (e) {
-      return res.status(400).json({ message: 'Invalid media data' });
-    }
-  }
+  const media = parseJsonField<any[]>(res, req.body.media, 'media', []);
+  if (media === null) return;
 
   try {
     // Insert into projects table
