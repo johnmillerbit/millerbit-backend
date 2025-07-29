@@ -55,6 +55,11 @@ app.get('/api/protected', authenticateToken, (req: any, res) => {
 });
 
 const startServer = async () => {
+  if (!process.env.JWT_SECRET) {
+    console.error('FATAL ERROR: JWT_SECRET is not defined.');
+    process.exit(1);
+  }
+
   await connectDb();
   app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
