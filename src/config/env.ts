@@ -4,7 +4,7 @@
  * and provides them in a type-safe manner.
  */
 
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -26,12 +26,15 @@ const getEnv = () => {
 
   // Find all keys that have an undefined value.
   const missingVars = Object.entries(config)
-    .filter(([, value]) => value === undefined)
+    .filter(([, value]) => !value)
     .map(([key]) => key);
 
-  // If any required variables are missing, log an error and exit.
   if (missingVars.length > 0) {
-    console.error(`FATAL ERROR: Missing required environment variables: ${missingVars.join(', ')}`);
+    console.error(
+      `FATAL ERROR: Missing or empty required environment variables: ${missingVars.join(
+        ", "
+      )}`
+    );
     process.exit(1);
   }
 
