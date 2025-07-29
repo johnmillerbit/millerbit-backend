@@ -173,6 +173,10 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
     res.status(200).json({ message: `User ${id} deleted successfully.` });
 
   } catch (error: any) {
+    // Check for foreign key violation error (PostgreSQL error code 23503)
+    if (error.code === '23503') {
+      return res.status(409).json({ message: 'Cannot delete user. They may be the creator of existing projects.' });
+    }
     handleControllerError(res, error, 'Error deleting user');
   }
 };

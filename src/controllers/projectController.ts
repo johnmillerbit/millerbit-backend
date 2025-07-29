@@ -460,16 +460,9 @@ export const deleteProject = async (req: AuthenticatedRequest, res: Response) =>
     // Start a transaction
     await query('BEGIN');
 
-    // 1. Delete related records from project_media
-    await query('DELETE FROM project_media WHERE project_id = $1', [id]);
-
-    // 2. Delete related records from project_skills
-    await query('DELETE FROM project_skills WHERE project_id = $1', [id]);
-
-    // 3. Delete related records from project_participants
-    await query('DELETE FROM project_participants WHERE project_id = $1', [id]);
-
-    // 4. Finally, delete the project itself
+    // The following DELETE statements are redundant due to ON DELETE CASCADE constraints in the database schema.
+    // The database will automatically delete related records from project_media, project_skills, and project_participants
+    // when the project is deleted.
     const result = await query('DELETE FROM projects WHERE project_id = $1', [id]);
 
     if (result.rowCount === 0) {
