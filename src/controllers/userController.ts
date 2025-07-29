@@ -1,11 +1,11 @@
-import { Request, Response } from 'express';
-import { query } from '../database';
-import multer from 'multer';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import bcrypt from 'bcrypt';
-import fs from 'fs';
-import { handleControllerError, handleAuthError } from '../utils/errorHandler';
+import { Request, Response } from "express";
+import { query, getClient } from "../database";
+import multer from "multer";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+import bcrypt from "bcrypt";
+import fs from "fs";
+import { handleControllerError, handleAuthError } from "../utils/errorHandler";
 
 interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -18,7 +18,10 @@ interface AuthenticatedRequest extends Request {
  * @desc Get basic user profile details
  * @access Public
  */
-export const getUserProfile = async (req: AuthenticatedRequest, res: Response) => {
+export const getUserProfile = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
 
   try {
@@ -43,13 +46,12 @@ export const getUserProfile = async (req: AuthenticatedRequest, res: Response) =
     const user = userResult.rows[0];
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     res.status(200).json(user);
-
   } catch (error: any) {
-    handleControllerError(res, error, 'Error fetching user profile');
+    handleControllerError(res, error, "Error fetching user profile");
   }
 };
 
@@ -58,7 +60,10 @@ export const getUserProfile = async (req: AuthenticatedRequest, res: Response) =
  * @desc Get skills associated with a user
  * @access Public
  */
-export const getUserSkills = async (req: AuthenticatedRequest, res: Response) => {
+export const getUserSkills = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
 
   try {
@@ -71,9 +76,8 @@ export const getUserSkills = async (req: AuthenticatedRequest, res: Response) =>
     );
 
     res.status(200).json(skillsResult.rows);
-
   } catch (error: any) {
-    handleControllerError(res, error, 'Error fetching user skills');
+    handleControllerError(res, error, "Error fetching user skills");
   }
 };
 
@@ -82,7 +86,10 @@ export const getUserSkills = async (req: AuthenticatedRequest, res: Response) =>
  * @desc Get projects associated with a user
  * @access Public
  */
-export const getUserProjects = async (req: AuthenticatedRequest, res: Response) => {
+export const getUserProjects = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
 
   try {
@@ -104,9 +111,8 @@ export const getUserProjects = async (req: AuthenticatedRequest, res: Response) 
     );
 
     res.status(200).json(projectsResult.rows);
-
   } catch (error: any) {
-    handleControllerError(res, error, 'Error fetching user projects');
+    handleControllerError(res, error, "Error fetching user projects");
   }
 };
 
@@ -116,30 +122,64 @@ export const getUserProjects = async (req: AuthenticatedRequest, res: Response) 
  * @access Private (Admin)
  */
 export const createMember = async (req: Request, res: Response) => {
-  const { email, password, first_name, last_name, position, bio, profile_picture_url, role } = req.body;
+  const {
+    email,
+    password,
+    first_name,
+    last_name,
+    position,
+    bio,
+    profile_picture_url,
+    role,
+  } = req.body;
 
   if (!email || !password || !first_name || !last_name) {
-    return res.status(400).json({ message: 'Email, password, first name, and last name are required.' });
+    return res
+      .status(400)
+      .json({
+        message: "Email, password, first name, and last name are required.",
+      });
   }
 
+  const client = await getClient();
   try {
-    const existingUser = await query('SELECT user_id FROM users WHERE email = $1', [email]);
+    await client.query("BEGIN");
+
+    const existingUser = await client.query(
+      "SELECT user_id FROM users WHERE email = $1",
+      [email]
+    );
     if (existingUser.rows.length > 0) {
-      return res.status(409).json({ message: 'User with this email already exists.' });
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ message: "User with this email already exists." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUserResult = await query(
+    const newUserResult = await client.query(
       `INSERT INTO users (email, password_hash, first_name, last_name, position, bio, profile_picture_url, role)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING user_id, email, first_name, last_name, position, bio, profile_picture_url, role, status, created_at, updated_at`,
-      [email, hashedPassword, first_name, last_name, position, bio, profile_picture_url, role || 'team_member']
+      [
+        email,
+        hashedPassword,
+        first_name,
+        last_name,
+        position,
+        bio,
+        profile_picture_url,
+        role || "team_member",
+      ]
     );
 
+    await client.query("COMMIT");
     res.status(201).json(newUserResult.rows[0]);
-
   } catch (error: any) {
-    handleControllerError(res, error, 'Error creating member');
+    await client.query("ROLLBACK");
+    handleControllerError(res, error, "Error creating member");
+  } finally {
+    client.release();
   }
 };
 
@@ -152,32 +192,63 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   if (req.userId === id) {
-    return handleAuthError(res, 'Forbidden: You cannot delete your own account.', 403);
+    return handleAuthError(
+      res,
+      "Forbidden: You cannot delete your own account.",
+      403
+    );
   }
 
+  const client = await getClient();
   try {
-    const targetUserResult = await query('SELECT role FROM users WHERE user_id = $1', [id]);
+    await client.query("BEGIN");
+
+    const targetUserResult = await client.query(
+      "SELECT role FROM users WHERE user_id = $1",
+      [id]
+    );
     if (targetUserResult.rows.length === 0) {
-      return res.status(404).json({ message: 'User not found.' });
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "User not found." });
     }
-    if (targetUserResult.rows[0].role === 'team_leader' && req.userRole !== 'admin') {
-      return handleAuthError(res, 'Forbidden: Only an admin can delete another Team Leader.', 403);
+    if (
+      targetUserResult.rows[0].role === "team_leader" &&
+      req.userRole !== "admin"
+    ) {
+      await client.query("ROLLBACK");
+      return handleAuthError(
+        res,
+        "Forbidden: Only an admin can delete another Team Leader.",
+        403
+      );
     }
 
-    const deleteResult = await query('DELETE FROM users WHERE user_id = $1 RETURNING user_id', [id]);
+    const deleteResult = await client.query(
+      "DELETE FROM users WHERE user_id = $1 RETURNING user_id",
+      [id]
+    );
 
     if (deleteResult.rowCount === 0) {
-      return res.status(404).json({ message: 'User not found.' });
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "User not found." });
     }
 
+    await client.query("COMMIT");
     res.status(200).json({ message: `User ${id} deleted successfully.` });
-
   } catch (error: any) {
+    await client.query("ROLLBACK");
     // Check for foreign key violation error (PostgreSQL error code 23503)
-    if (error.code === '23503') {
-      return res.status(409).json({ message: 'Cannot delete user. They may be the creator of existing projects.' });
+    if (error.code === "23503") {
+      return res
+        .status(409)
+        .json({
+          message:
+            "Cannot delete user. They may be the creator of existing projects.",
+        });
     }
-    handleControllerError(res, error, 'Error deleting user');
+    handleControllerError(res, error, "Error deleting user");
+  } finally {
+    client.release();
   }
 };
 
@@ -188,10 +259,12 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
  */
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
-    const usersResult = await query('SELECT user_id, first_name, last_name, email, role, position, status, profile_picture_url FROM users');
+    const usersResult = await query(
+      "SELECT user_id, first_name, last_name, email, role, position, status, profile_picture_url FROM users"
+    );
     res.status(200).json(usersResult.rows);
   } catch (error: any) {
-    handleControllerError(res, error, 'Error fetching all users');
+    handleControllerError(res, error, "Error fetching all users");
   }
 };
 
@@ -200,48 +273,95 @@ export const getAllUsers = async (req: Request, res: Response) => {
  * @desc Update user profile details
  * @access Private (Authenticated User, Team Leader, Admin)
  */
-export const updateUserProfile = async (req: AuthenticatedRequest, res: Response) => {
+export const updateUserProfile = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
-  const { first_name, last_name, position, bio, profile_picture_url, skills, email } = req.body;
+  const {
+    first_name,
+    last_name,
+    position,
+    bio,
+    profile_picture_url,
+    skills,
+    email,
+  } = req.body;
 
-  if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return handleAuthError(res, 'Forbidden: You can only update your own profile unless you are a Team Leader or Admin.', 403);
+  if (
+    req.userId !== id &&
+    req.userRole !== "team_leader" &&
+    req.userRole !== "admin"
+  ) {
+    return handleAuthError(
+      res,
+      "Forbidden: You can only update your own profile unless you are a Team Leader or Admin.",
+      403
+    );
   }
 
+  const client = await getClient();
   try {
+    await client.query("BEGIN");
+
     const updateFields: string[] = [];
     const updateValues: any[] = [];
     let paramIndex = 1;
 
-    if (first_name !== undefined) { updateFields.push(`first_name = $${paramIndex++}`); updateValues.push(first_name); }
-    if (last_name !== undefined) { updateFields.push(`last_name = $${paramIndex++}`); updateValues.push(last_name); }
-    if (position !== undefined) { updateFields.push(`position = $${paramIndex++}`); updateValues.push(position); }
-    if (bio !== undefined) { updateFields.push(`bio = $${paramIndex++}`); updateValues.push(bio); }
-    if (profile_picture_url !== undefined) { updateFields.push(`profile_picture_url = $${paramIndex++}`); updateValues.push(profile_picture_url); }
-    if (email !== undefined) { updateFields.push(`email = $${paramIndex++}`); updateValues.push(email); }
+    if (first_name !== undefined) {
+      updateFields.push(`first_name = $${paramIndex++}`);
+      updateValues.push(first_name);
+    }
+    if (last_name !== undefined) {
+      updateFields.push(`last_name = $${paramIndex++}`);
+      updateValues.push(last_name);
+    }
+    if (position !== undefined) {
+      updateFields.push(`position = $${paramIndex++}`);
+      updateValues.push(position);
+    }
+    if (bio !== undefined) {
+      updateFields.push(`bio = $${paramIndex++}`);
+      updateValues.push(bio);
+    }
+    if (profile_picture_url !== undefined) {
+      updateFields.push(`profile_picture_url = $${paramIndex++}`);
+      updateValues.push(profile_picture_url);
+    }
 
     if (updateFields.length > 0) {
-      const updateQuery = `UPDATE users SET ${updateFields.join(', ')}, updated_at = NOW() WHERE user_id = $${paramIndex} RETURNING *`;
+      const updateQuery = `UPDATE users SET ${updateFields.join(
+        ", "
+      )}, updated_at = NOW() WHERE user_id = $${paramIndex} RETURNING *`;
       updateValues.push(id);
-      await query(updateQuery, updateValues);
+      await client.query(updateQuery, updateValues);
     }
 
     if (skills !== undefined && Array.isArray(skills)) {
-      await query('DELETE FROM user_skills WHERE user_id = $1', [id]);
+      await client.query("DELETE FROM user_skills WHERE user_id = $1", [id]);
 
       for (const skillName of skills) {
-        let skillResult = await query('SELECT skill_id FROM skills WHERE skill_name = $1', [skillName]);
+        let skillResult = await client.query(
+          "SELECT skill_id FROM skills WHERE skill_name = $1",
+          [skillName]
+        );
         let skillId = skillResult.rows[0]?.skill_id;
 
         if (!skillId) {
-          const newSkillResult = await query('INSERT INTO skills (skill_name) VALUES ($1) RETURNING skill_id', [skillName]);
+          const newSkillResult = await client.query(
+            "INSERT INTO skills (skill_name) VALUES ($1) RETURNING skill_id",
+            [skillName]
+          );
           skillId = newSkillResult.rows[0].skill_id;
         }
-        await query('INSERT INTO user_skills (user_id, skill_id) VALUES ($1, $2) ON CONFLICT (user_id, skill_id) DO NOTHING', [id, skillId]);
+        await client.query(
+          "INSERT INTO user_skills (user_id, skill_id) VALUES ($1, $2) ON CONFLICT (user_id, skill_id) DO NOTHING",
+          [id, skillId]
+        );
       }
     }
 
-    const updatedUser = await query(
+    const updatedUser = await client.query(
       `SELECT
         user_id,
         email,
@@ -259,10 +379,13 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
       [id]
     );
 
+    await client.query("COMMIT");
     res.status(200).json(updatedUser.rows[0]);
-
   } catch (error: any) {
-    handleControllerError(res, error, 'Error updating user profile');
+    await client.query("ROLLBACK");
+    handleControllerError(res, error, "Error updating user profile");
+  } finally {
+    client.release();
   }
 };
 
@@ -271,33 +394,64 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
  * @desc Add a skill to a user's profile
  * @access Private (Authenticated User, Team Leader, Admin)
  */
-export const addSkillToUser = async (req: AuthenticatedRequest, res: Response) => {
+export const addSkillToUser = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
   const { skill_name } = req.body;
 
   if (!skill_name) {
-    return res.status(400).json({ message: 'Skill name is required' });
+    return res.status(400).json({ message: "Skill name is required" });
   }
 
-  if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return handleAuthError(res, 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.', 403);
+  if (
+    req.userId !== id &&
+    req.userRole !== "team_leader" &&
+    req.userRole !== "admin"
+  ) {
+    return handleAuthError(
+      res,
+      "Forbidden: You can only update your own skills unless you are a Team Leader or Admin.",
+      403
+    );
   }
 
+  const client = await getClient();
   try {
-    let skillResult = await query('SELECT skill_id FROM skills WHERE skill_name = $1', [skill_name]);
+    await client.query("BEGIN");
+
+    let skillResult = await client.query(
+      "SELECT skill_id FROM skills WHERE skill_name = $1",
+      [skill_name]
+    );
     let skillId = skillResult.rows[0]?.skill_id;
 
     if (!skillId) {
-      const newSkillResult = await query('INSERT INTO skills (skill_name) VALUES ($1) RETURNING skill_id', [skill_name]);
+      const newSkillResult = await client.query(
+        "INSERT INTO skills (skill_name) VALUES ($1) RETURNING skill_id",
+        [skill_name]
+      );
       skillId = newSkillResult.rows[0].skill_id;
     }
 
-    await query('INSERT INTO user_skills (user_id, skill_id) VALUES ($1, $2) ON CONFLICT (user_id, skill_id) DO NOTHING', [id, skillId]);
+    await client.query(
+      "INSERT INTO user_skills (user_id, skill_id) VALUES ($1, $2) ON CONFLICT (user_id, skill_id) DO NOTHING",
+      [id, skillId]
+    );
 
-    res.status(200).json({ message: `Skill '${skill_name}' added successfully to user ${id}`, skill: { skill_id: skillId, skill_name: skill_name } });
-
+    await client.query("COMMIT");
+    res
+      .status(200)
+      .json({
+        message: `Skill '${skill_name}' added successfully to user ${id}`,
+        skill: { skill_id: skillId, skill_name: skill_name },
+      });
   } catch (error: any) {
-    handleControllerError(res, error, 'Error adding skill to user');
+    await client.query("ROLLBACK");
+    handleControllerError(res, error, "Error adding skill to user");
+  } finally {
+    client.release();
   }
 };
 
@@ -306,30 +460,61 @@ export const addSkillToUser = async (req: AuthenticatedRequest, res: Response) =
  * @desc Remove a skill from a user's profile
  * @access Private (Authenticated User, Team Leader, Admin)
  */
-export const removeSkillFromUser = async (req: AuthenticatedRequest, res: Response) => {
+export const removeSkillFromUser = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id, skillId } = req.params;
 
-  if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return handleAuthError(res, 'Forbidden: You can only update your own skills unless you are a Team Leader or Admin.', 403);
+  if (
+    req.userId !== id &&
+    req.userRole !== "team_leader" &&
+    req.userRole !== "admin"
+  ) {
+    return handleAuthError(
+      res,
+      "Forbidden: You can only update your own skills unless you are a Team Leader or Admin.",
+      403
+    );
   }
 
+  const client = await getClient();
   try {
-    const deleteResult = await query('DELETE FROM user_skills WHERE user_id = $1 AND skill_id = $2 RETURNING *', [id, skillId]);
+    await client.query("BEGIN");
+
+    const deleteResult = await client.query(
+      "DELETE FROM user_skills WHERE user_id = $1 AND skill_id = $2 RETURNING *",
+      [id, skillId]
+    );
 
     if (deleteResult.rowCount === 0) {
-      return res.status(404).json({ message: 'Skill not found for this user' });
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Skill not found for this user" });
     }
 
-    res.status(200).json({ message: `Skill ${skillId} removed successfully from user ${id}` });
-
+    await client.query("COMMIT");
+    res
+      .status(200)
+      .json({
+        message: `Skill ${skillId} removed successfully from user ${id}`,
+      });
   } catch (error: any) {
-    handleControllerError(res, error, 'Error removing skill from user');
+    await client.query("ROLLBACK");
+    handleControllerError(res, error, "Error removing skill from user");
+  } finally {
+    client.release();
   }
 };
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '..', '..', 'uploads', 'profile_pictures');
+    const uploadPath = path.join(
+      __dirname,
+      "..",
+      "..",
+      "uploads",
+      "profile_pictures"
+    );
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -338,15 +523,19 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const uniqueSuffix = uuidv4();
     const fileExtension = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + fileExtension);
+    cb(null, file.fieldname + "-" + uniqueSuffix + fileExtension);
   },
 });
 
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  if (file.mimetype.startsWith('image/')) {
+const fileFilter = (
+  req: Request,
+  file: Express.Multer.File,
+  cb: multer.FileFilterCallback
+) => {
+  if (file.mimetype.startsWith("image/")) {
     cb(null, true);
   } else {
-    cb(new Error('Only image files are allowed!'));
+    cb(new Error("Only image files are allowed!"));
   }
 };
 
@@ -357,25 +546,51 @@ export const upload = multer({ storage: storage, fileFilter: fileFilter });
  * @desc Upload a profile picture for a user
  * @access Private (Authenticated User, Team Leader, Admin)
  */
-export const uploadProfilePicture = async (req: AuthenticatedRequest, res: Response) => {
+export const uploadProfilePicture = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   const { id } = req.params;
 
-  if (req.userId !== id && req.userRole !== 'team_leader' && req.userRole !== 'admin') {
-    return handleAuthError(res, 'Forbidden: You can only upload your own profile picture unless you are a Team Leader or Admin.', 403);
+  if (
+    req.userId !== id &&
+    req.userRole !== "team_leader" &&
+    req.userRole !== "admin"
+  ) {
+    return handleAuthError(
+      res,
+      "Forbidden: You can only upload your own profile picture unless you are a Team Leader or Admin.",
+      403
+    );
   }
 
+  const client = await getClient();
   try {
+    await client.query("BEGIN");
+
     if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "No file uploaded" });
     }
 
     const profilePictureUrl = `/uploads/profile_pictures/${req.file.filename}`;
 
-    await query('UPDATE users SET profile_picture_url = $1, updated_at = NOW() WHERE user_id = $2', [profilePictureUrl, id]);
+    await client.query(
+      "UPDATE users SET profile_picture_url = $1, updated_at = NOW() WHERE user_id = $2",
+      [profilePictureUrl, id]
+    );
 
-    res.status(200).json({ message: 'Profile picture uploaded successfully', profile_picture_url: profilePictureUrl });
-
+    await client.query("COMMIT");
+    res
+      .status(200)
+      .json({
+        message: "Profile picture uploaded successfully",
+        profile_picture_url: profilePictureUrl,
+      });
   } catch (error: any) {
-    handleControllerError(res, error, 'Error uploading profile picture');
+    await client.query("ROLLBACK");
+    handleControllerError(res, error, "Error uploading profile picture");
+  } finally {
+    client.release();
   }
 };

@@ -64,7 +64,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     // 2. Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const passwordResetExpires = new Date(Date.now() + 3600000); // 1 hour from now
+    const passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
 
     // 3. Save token and expiry to database
     await query(
