@@ -1,4 +1,7 @@
-// my-backend-api/src/routes/userRoutes.ts
+/**
+ * @file Defines routes for user-related actions, such as profiles, skills, and projects.
+ */
+
 import { Router } from 'express';
 import {
   getUserProfile,
@@ -18,24 +21,32 @@ import { authorizeRoles } from '../middleware/authorizeRoles';
 
 const router = Router();
 
-// Publicly accessible routes (no authentication required)
-// Anyone can view a user's basic profile, skills, and projects
+// --- Publicly Accessible User Routes ---
+// These routes do not require authentication and are used for public profile pages.
+
+// Get a user's public profile information.
 router.get('/:id', getUserProfile);
+// Get the skills associated with a user.
 router.get('/:id/skills', getUserSkills);
+// Get the projects associated with a user.
 router.get('/:id/projects', getUserProjects);
 
-// Authenticated routes (require a valid JWT token)
+// --- Authenticated Routes ---
+// All routes below this line require a valid JWT token.
 router.use(authenticateToken); // Apply authentication middleware to all routes below this line
 
-router.get('/', getAllUsers); // Get all users (e.g., for admin dashboard) - requires auth now
+// Get a list of all users (e.g., for an admin dashboard).
+router.get('/', getAllUsers);
+// Create a new team member. Restricted to team leaders and admins.
 router.post('/create', authorizeRoles(['team_leader', 'admin']), createMember); // Only Team Leaders and Admins can create members
+// Delete a user. Restricted to team leaders and admins.
 router.delete('/:id', authorizeRoles(['team_leader', 'admin']), deleteUser); // Only Team Leaders and Admins can delete users
 
-// User-specific actions (can be done by self, team_leader, or admin)
+// --- User-Specific Actions ---
+// These actions can be performed by the user themselves, or by a team leader/admin.
 router.put('/:id', authorizeRoles(['team_member', 'team_leader', 'admin']), updateUserProfile); // User can update their own profile (or TL/Admin can)
 router.post('/:id/skills', addSkillToUser); // User can add skills to their profile (or TL/Admin can)
 router.delete('/:id/skills/:skillId', removeSkillFromUser); // User can remove skills from their profile (or TL/Admin can)
 router.post('/:id/profile-picture', upload.single('profile_picture'), uploadProfilePicture); // User can upload their profile picture (or TL/Admin can)
-
 
 export default router;
