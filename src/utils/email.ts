@@ -1,22 +1,35 @@
+/**
+ * @file Email utility for sending emails via Nodemailer.
+ * This file configures the email transporter and provides a function to send emails.
+ */
+
 import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import { env } from '../config/env';
 
-dotenv.config();
-
+/**
+ * Nodemailer transporter configured to use Gmail with credentials from environment variables.
+ */
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: parseInt(process.env.EMAIL_PORT || '587', 10),
-  secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+  service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: env.EMAIL_USER,
+    pass: env.EMAIL_PASS,
   },
 });
 
+/**
+ * Sends an email using the pre-configured transporter.
+ *
+ * @param {string} to - The recipient's email address.
+ * @param {string} subject - The subject line of the email.
+ * @param {string} text - The plain text body of the email.
+ * @param {string} html - The HTML body of the email.
+ * @throws Will throw an error if the email fails to send.
+ */
 export const sendEmail = async (to: string, subject: string, text: string, html: string) => {
   try {
     await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
+      from: env.EMAIL_FROM,
       to,
       subject,
       text,
