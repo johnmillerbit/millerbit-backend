@@ -47,15 +47,15 @@ app.use('/uploads', express.static('uploads'));
 // --- API Route Mounting ---
 
 // Mount authentication-related routes (login, password reset, etc.).
-app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
 // Mount user-related routes (profiles, skills, etc.).
-app.use('/api/users', userRoutes);
+app.use('/users', userRoutes);
 // Mount project-related routes.
-app.use('/api/projects', projectRoutes);
+app.use('/projects', projectRoutes);
 // Mount skill-related routes.
-app.use('/api/skills', skillRoutes);
+app.use('/skills', skillRoutes);
 // Mount dashboard-related routes.
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/dashboard', dashboardRoutes);
 // Mount test and example routes (e.g., health checks).
 app.use('/', testRoutes);
 
