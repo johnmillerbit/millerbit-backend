@@ -14,7 +14,8 @@ import {
   upload,
   getAllUsers,
   createMember,
-  deleteUser
+  deleteUser,
+  getLandingUser
 } from '../controllers/userController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { authorizeRoles } from '../middleware/authorizeRoles';
@@ -31,12 +32,15 @@ router.get('/:id/skills', getUserSkills);
 // Get the projects associated with a user.
 router.get('/:id/projects', getUserProjects);
 
+// --- Publicly Accessible User Routes ---
+// Get a list of all users (e.g., for the public landing page team section).
+router.get('/', getAllUsers);
+router.get('/get/landingUser', getLandingUser);
+
 // --- Authenticated Routes ---
 // All routes below this line require a valid JWT token.
 router.use(authenticateToken); // Apply authentication middleware to all routes below this line
 
-// Get a list of all users (e.g., for an admin dashboard).
-router.get('/', getAllUsers);
 // Create a new team member. Restricted to team leaders.
 router.post('/create', authorizeRoles(['team_leader']), createMember); // Only Team Leaders can create members
 // Delete a user. Restricted to team leaders.

@@ -44,7 +44,7 @@ export const getPublicOverviewData = async (req: Request, res: Response) => {
     const memberCount = parseInt(memberCountResult.rows[0].count, 10);
 
     // Fetch total projects count
-    const totalProjectsResult = await query('SELECT COUNT(*) FROM projects');
+    const totalProjectsResult = await query('SELECT COUNT(*) FROM projects where status = \'approved\'');
     const totalProjects = parseInt(totalProjectsResult.rows[0].count, 10);
 
     res.status(200).json({

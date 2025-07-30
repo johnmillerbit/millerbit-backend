@@ -32,6 +32,126 @@ const projectPictureFileFilter = (req: Request, file: Express.Multer.File, cb: m
   }
 };
 
+/**
+ * @route PUT /api/projects/:id
+ * @desc Update an existing project
+ * @access Private (Authenticated User, Team Leader, Admin - only for own projects or if authorized)
+ */
+export const updateProject = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params; // project_id
+  const { project_name, description } = req.body;
+  const userId = req.userId; // User making the request
+
+  if (!project_name || !description) {
+    return res.status(400).json({ message: 'Project name and description are required' });
+  }
+
+  let project_picture_url: string | undefined = undefined;
+  if (req.file) {
+    project_picture_url = `/uploads/project_media/${req.file.filename}`;
+  }
+
+  const participants = parseJsonField<string[]>(res, req.body.participants, 'participants', []);
+  if (participants === null) return;
+
+  const skills = parseJsonField<string[]>(res, req.body.skills, 'skills', []);
+  if (skills === null) return;
+
+  const media = parseJsonField<any[]>(res, req.body.media, 'media', []);
+  if (media === null) return;
+
+  try {
+    await query('BEGIN');
+
+    // Check if the user is authorized to update this project
+    // Only the creator, a team leader, or an admin can update
+    const projectCreatorResult = await query(
+      'SELECT created_by_user_id FROM projects WHERE project_id = $1',
+      [id]
+    );
+
+    if (projectCreatorResult.rowCount === 0) {
+      await query('ROLLBACK');
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const createdByUserId = projectCreatorResult.rows[0].created_by_user_id;
+    const isCreator = userId === createdByUserId;
+    const isTeamLeaderOrAdmin = req.userRole === 'team_leader';
+
+    if (!isCreator && !isTeamLeaderOrAdmin) {
+      await query('ROLLBACK');
+      return res.status(403).json({ message: 'Forbidden: You do not have permission to update this project.' });
+    }
+
+    // Update project details
+    let updateQuery = 'UPDATE projects SET project_name = $1, description = $2, updated_at = NOW()';
+    const updateParams = [project_name, description];
+    let paramIndex = 3;
+
+    if (project_picture_url !== undefined) {
+      updateQuery += `, project_picture_url = $${paramIndex++}`;
+      updateParams.push(project_picture_url);
+    }
+    updateQuery += ` WHERE project_id = $${paramIndex++} RETURNING *`;
+    updateParams.push(id);
+
+    const projectResult = await query(updateQuery, updateParams);
+
+    if (projectResult.rowCount === 0) {
+      await query('ROLLBACK');
+      return res.status(404).json({ message: 'Project not found after update attempt' });
+    }
+
+    // Update participants: Delete existing and insert new ones
+    await query('DELETE FROM project_participants WHERE project_id = $1', [id]);
+    if (participants && Array.isArray(participants)) {
+      for (const participantId of participants) {
+        await query('INSERT INTO project_participants (project_id, user_id) VALUES ($1, $2) ON CONFLICT (project_id, user_id) DO NOTHING', [id, participantId]);
+      }
+    }
+    // Ensure the creator is always a participant
+    await query('INSERT INTO project_participants (project_id, user_id) VALUES ($1, $2) ON CONFLICT (project_id, user_id) DO NOTHING', [id, createdByUserId]);
+
+
+    // Update skills: Delete existing and insert new ones
+    await query('DELETE FROM project_skills WHERE project_id = $1', [id]);
+    if (skills && Array.isArray(skills)) {
+      for (const skillName of skills) {
+        let skillResult = await query('SELECT skill_id FROM skills WHERE skill_name = $1', [skillName]);
+        let skillId = skillResult.rows[0]?.skill_id;
+
+        if (!skillId) {
+          const newSkillResult = await query('INSERT INTO skills (skill_name) VALUES ($1) RETURNING skill_id', [skillName]);
+          skillId = newSkillResult.rows[0].skill_id;
+        }
+        await query('INSERT INTO project_skills (project_id, skill_id) VALUES ($1, $2) ON CONFLICT (project_id, skill_id) DO NOTHING', [id, skillId]);
+      }
+    }
+
+    // Update media: Delete existing and insert new ones
+    await query('DELETE FROM project_media WHERE project_id = $1', [id]);
+    if (media && Array.isArray(media)) {
+      for (const mediaItem of media) {
+        const { media_type, url, description } = mediaItem;
+        if (media_type && url) {
+          await query(
+            'INSERT INTO project_media (project_id, media_type, url, description) VALUES ($1, $2, $3, $4)',
+            [id, media_type, url, description]
+          );
+        }
+      }
+    }
+
+    await query('COMMIT');
+    res.status(200).json({ message: 'Project updated successfully', project: projectResult.rows[0] });
+
+  } catch (error: any) {
+    await query('ROLLBACK');
+    handleControllerError(res, error, 'Error updating project');
+  }
+};
+
 export const uploadProjectPictureMiddleware = multer({ storage: projectPictureStorage, fileFilter: projectPictureFileFilter }).single('project_picture');
 
 const projectMediaStorage = multer.diskStorage({
@@ -138,9 +258,99 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
  * @desc Get projects for portfolio (can filter by memberId and skillName)
  * @access Public
  */
-export const getPortfolioProjects = async (req: AuthenticatedRequest, res: Response) => {
-  const { memberId, skillName } = req.query;
+export const getApprovedProjects = async (req: AuthenticatedRequest, res: Response) => {
+  const { memberId, skillName, page = '1', limit = '10' } = req.query;
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const offset = (pageNumber - 1) * limitNumber;
 
+  try {
+    let countQueryText = `
+      SELECT COUNT(DISTINCT p.project_id)
+      FROM projects p
+      LEFT JOIN project_participants pp ON p.project_id = pp.project_id
+      LEFT JOIN project_skills ps ON p.project_id = ps.project_id
+      LEFT JOIN skills s ON ps.skill_id = s.skill_id
+      WHERE p.status = 'approved'
+    `;
+    let projectsQueryText = `
+      SELECT
+        p.project_id,
+        p.project_name,
+        p.description,
+        p.project_picture_url,
+        p.status,
+        p.created_at,
+        p.updated_at,
+        json_build_object(
+          'user_id', u.user_id,
+          'first_name', u.first_name,
+          'last_name', u.last_name,
+          'email', u.email
+        ) AS created_by,
+        COALESCE(
+          (SELECT json_agg(json_build_object('user_id', pp_u.user_id, 'first_name', pp_u.first_name, 'last_name', pp_u.last_name))
+           FROM project_participants pp_inner
+           JOIN users pp_u ON pp_inner.user_id = pp_u.user_id
+           WHERE pp_inner.project_id = p.project_id
+          ), '[]'
+        ) AS participants,
+        COALESCE(json_agg(DISTINCT s.skill_name) FILTER (WHERE s.skill_id IS NOT NULL), '[]') AS skills
+      FROM projects p
+      JOIN users u ON p.created_by_user_id = u.user_id
+      LEFT JOIN project_skills ps ON p.project_id = ps.project_id
+      LEFT JOIN skills s ON ps.skill_id = s.skill_id
+      WHERE p.status = 'approved'
+    `;
+    const queryParams: any[] = [];
+    let paramIndex = 1;
+
+    if (memberId) {
+      countQueryText += ` AND pp.user_id = $${paramIndex}`;
+      projectsQueryText += ` AND p.project_id IN (SELECT project_id FROM project_participants WHERE user_id = $${paramIndex})`;
+      queryParams.push(memberId);
+      paramIndex++;
+    }
+
+    if (skillName) {
+      countQueryText += ` AND s.skill_name ILIKE $${paramIndex}`;
+      projectsQueryText += ` AND p.project_id IN (SELECT project_id FROM project_skills ps_inner JOIN skills s_inner ON ps_inner.skill_id = s_inner.skill_id WHERE s_inner.skill_name ILIKE $${paramIndex})`;
+      queryParams.push(`%${skillName}%`);
+      paramIndex++;
+    }
+
+    projectsQueryText += `
+      GROUP BY p.project_id, u.user_id
+      ORDER BY p.created_at DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+    queryParams.push(limitNumber, offset);
+
+    const totalProjectsResult = await query(countQueryText, queryParams.slice(0, queryParams.length - 2)); // Exclude limit and offset for count
+    const totalProjects = parseInt(totalProjectsResult.rows[0].count, 10);
+
+    const projectsResult = await query(projectsQueryText, queryParams);
+
+    res.status(200).json({
+      projects: projectsResult.rows,
+      totalProjects,
+      currentPage: pageNumber,
+      totalPages: Math.ceil(totalProjects / limitNumber),
+    });
+
+  } catch (error: any) {
+    handleControllerError(res, error, 'Error fetching portfolio projects');
+  }
+};
+
+/**
+ * @route GET /api/landing/projects
+ * @desc Get a single approved project for the landing page.
+ *       This function is intended to return only one project,
+ *       so memberId and skillName filters are not applicable here.
+ * @access Public
+ */
+export const getLandingProjects = async (req: AuthenticatedRequest, res: Response) => {
   try {
     let queryText = `
       SELECT
@@ -168,30 +378,15 @@ export const getPortfolioProjects = async (req: AuthenticatedRequest, res: Respo
       LEFT JOIN project_participants pp ON p.project_id = pp.project_id
       LEFT JOIN project_media pm ON p.project_id = pm.project_id
       WHERE p.status = 'approved'
-    `;
-    const queryParams: any[] = [];
-    let paramIndex = 1;
-
-    if (memberId) {
-      queryText += ` AND pp.user_id = $${paramIndex++}`;
-      queryParams.push(memberId);
-    }
-
-    if (skillName) {
-      queryText += ` AND s.skill_name ILIKE $${paramIndex++}`;
-      queryParams.push(`%${skillName}%`);
-    }
-
-    queryText += `
       GROUP BY p.project_id, u.user_id
       ORDER BY p.created_at DESC
+      LIMIT 3
     `;
-
-    const projectsResult = await query(queryText, queryParams);
+    const projectsResult = await query(queryText);
     res.status(200).json(projectsResult.rows);
 
   } catch (error: any) {
-    handleControllerError(res, error, 'Error fetching portfolio projects');
+    handleControllerError(res, error, 'Error fetching landing project');
   }
 };
 

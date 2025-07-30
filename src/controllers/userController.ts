@@ -258,11 +258,41 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
  * @access Private (Team Leader, Admin)
  */
 export const getAllUsers = async (req: Request, res: Response) => {
+  const { page = '1', limit = '10', status = 'active' } = req.query;
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const offset = (pageNumber - 1) * limitNumber;
+
   try {
-    const usersResult = await query(
-      "SELECT user_id, first_name, last_name, email, role, position, status, profile_picture_url FROM users"
-    );
-    res.status(200).json(usersResult.rows);
+    let countQueryText = `SELECT COUNT(*) FROM users WHERE status = $1`;
+    let usersQueryText = `
+      SELECT
+        user_id,
+        first_name,
+        last_name,
+        email,
+        role,
+        position,
+        status,
+        profile_picture_url
+      FROM users
+      WHERE status = $1
+      ORDER BY created_at DESC
+      LIMIT $2 OFFSET $3
+    `;
+    const queryParams = [status, limitNumber, offset];
+
+    const totalUsersResult = await query(countQueryText, [status]);
+    const totalUsers = parseInt(totalUsersResult.rows[0].count, 10);
+
+    const usersResult = await query(usersQueryText, queryParams);
+
+    res.status(200).json({
+      users: usersResult.rows,
+      totalUsers,
+      currentPage: pageNumber,
+      totalPages: Math.ceil(totalUsers / limitNumber),
+    });
   } catch (error: any) {
     handleControllerError(res, error, "Error fetching all users");
   }
@@ -540,6 +570,36 @@ const fileFilter = (
 };
 
 export const upload = multer({ storage: storage, fileFilter: fileFilter });
+
+/**
+ * @route GET /api/landing/user
+ * @desc Get 3 user for the landing page.
+ * @access Public
+ */
+export const getLandingUser = async (req: Request, res: Response) => {
+  try {
+    const userResult = await query(
+      `SELECT
+        user_id,
+        first_name,
+        last_name,
+        position,
+        profile_picture_url
+      FROM users
+      WHERE status = 'active'
+      ORDER BY created_at DESC
+      LIMIT 6`
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "No active users found for landing page" });
+    }
+
+    res.status(200).json(userResult.rows);
+  } catch (error: any) {
+    handleControllerError(res, error, "Error fetching landing user");
+  }
+};
 
 /**
  * @route POST /api/users/:id/profile-picture
